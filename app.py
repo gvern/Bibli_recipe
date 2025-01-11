@@ -202,35 +202,33 @@ def extract_recipe_info(raw_transcript):
     """
     try:
         prompt = f"""
-Tu es un assistant spécialisé dans l'extraction de recettes de cuisine à partir d'un texte.
-Le texte ci-dessous est la transcription d'une vidéo en français décrivant une recette.
+Analyse le texte ci-dessous et extrais les informations suivantes pour une recette de cuisine :
+- "ingredients": Une liste des ingrédients, chacun sous forme d'objet contenant "nom" (le nom ou descriptif) et "quantité" (le cas échéant, sinon "inconnu").
+- "steps": Une liste des étapes successives de la préparation.
+- "utensils": Une liste des ustensiles ou matériels de cuisine mentionnés.
+- "cook_time": La durée totale de cuisson ou de repos (en minutes, sinon "inconnu").
+- "prep_time": La durée de préparation (en minutes, sinon "inconnu").
 
-Je veux que tu analysies ce texte et que tu en extraies :
-- "ingredients": la liste (ou l'inventaire) des ingrédients avec leur nom ou descriptif
-- "steps": la liste (par étapes successives) de la préparation
-- "utensils": la liste des ustensiles ou matériels de cuisine mentionnés (couteau, planche, poêle, etc.)
-- "cook_time": si une durée de cuisson (ou repos) est mentionnée, sinon "inconnu"
+Réponds uniquement en JSON strict. Exemple :
 
-**Important** :
-1. Réponds uniquement en JSON strict, sans ajouter de texte explicatif.
-2. S'il manque des informations, mets "inconnu" ou une liste vide [].
-3. Même si les ingrédients sont seulement évoqués dans le texte (ex: “huile”, “beurre”, “œufs”, “champignons”, “ail”), mets-les dans la liste des ingrédients.
-4. Pour "steps", sépare les différentes étapes de la recette, même si elles sont décrites de façon continue.
-5. Pour "cook_time", essaie de repérer un temps (en minutes) si mentionné ("cuisson 10 minutes", par exemple). Sinon "inconnu".
-6. Pour "utensils", tout ce qui est matériel de cuisine (poêle, couteau, fouet, planche, etc.).
+{
+  "ingredients": [
+    {"nom": "pommes de terre", "quantité": "1 kg"},
+    {"nom": "gros sel", "quantité": "10 g"},
+    {"nom": "lait entier", "quantité": "50 cl"},
+    {"nom": "beurre", "quantité": "30 g"}
+  ],
+  "steps": ["Étape 1", "Étape 2", "Étape 3"],
+  "utensils": ["couteau", "moulin à légumes", "casserole"],
+  "cook_time": "25 minutes",
+  "prep_time": "15 minutes"
+}
+
 
 Voici le texte :
 
 \"\"\"{raw_transcript}\"\"\"
  
-Donne-moi ta réponse en JSON pur. Exemple:
-
-{{
-  "ingredients": ["œufs", "lait", "champignons"],
-  "steps": ["Éplucher...", "Faire chauffer..."],
-  "utensils": ["couteau", "poêle"],
-  "cook_time": "10 minutes"
-}}
         """
 
         response = client.chat.completions.create(
