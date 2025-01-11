@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Ajouter une Recette (URL YouTube)</h2>
+
+<form method="POST" action="{{ url_for('add_recipe') }}">
+    <label for="video_url">URL de la vidéo :</label>
+    <input type="text" name="video_url" id="video_url" placeholder="https://youtube.com/..." required>
+    <button type="submit">Extraire la Recette</button>
+</form>
+{% endblock %}

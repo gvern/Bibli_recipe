@@ -1,0 +1,4 @@
+Flask==2.2.5
+pytube==12.1.2
+openai-whisper==20230314
+torch==2.0.0

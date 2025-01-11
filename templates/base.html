@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <title>{{ title if title else "Ma Bibliothèque de Recettes" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Ma Bibliothèque de Recettes</h1>
+        <nav>
+            <a href="{{ url_for('index') }}">Accueil</a> |
+            <a href="{{ url_for('add_recipe') }}">Ajouter une Recette</a>
+        </nav>
+    </header>
+
+    <div class="content">
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer>
+        <p>&copy; 2025 - Mon Appli de Recettes</p>
+    </footer>
+</body>
+</html>
