@@ -201,36 +201,47 @@ def extract_recipe_info(raw_transcript):
     Utilise un prompt GPT plus précis pour mieux détecter.
     """
     try:
+        # Échapper les accolades dans le texte brut
+        escaped_transcript = raw_transcript.replace("{", "{{").replace("}", "}}")
+        
+        # Définition du prompt
         prompt = f"""
-Analyse le texte ci-dessous et extrais les informations suivantes pour une recette de cuisine :
-- "ingredients": Une liste des ingrédients, chacun sous forme d'objet contenant "nom" (le nom ou descriptif) et "quantité" (le cas échéant, sinon "inconnu").
-- "steps": Une liste des étapes successives de la préparation.
-- "utensils": Une liste des ustensiles ou matériels de cuisine mentionnés.
-- "cook_time": La durée totale de cuisson ou de repos (en minutes, sinon "inconnu").
-- "prep_time": La durée de préparation (en minutes, sinon "inconnu").
+        Analyse le texte ci-dessous et extrais les informations suivantes pour une recette de cuisine :
 
-Réponds uniquement en JSON strict. Exemple :
+        - "ingredients": Une liste des ingrédients, chacun sous forme d'objet contenant :
+            - "nom" : le nom ou descriptif de l'ingrédient.
+            - "quantité" : la quantité associée, si mentionnée, sinon "inconnu".
+        - "steps": Une liste des étapes successives de la préparation, chacune comme un élément distinct.
+        - "utensils": Une liste des ustensiles ou matériels de cuisine mentionnés dans le texte.
+        - "cook_time": La durée totale de cuisson ou de repos (en minutes, sinon "inconnu").
+        - "prep_time": La durée de préparation (en minutes, sinon "inconnu").
 
-{
-  "ingredients": [
-    {"nom": "pommes de terre", "quantité": "1 kg"},
-    {"nom": "gros sel", "quantité": "10 g"},
-    {"nom": "lait entier", "quantité": "50 cl"},
-    {"nom": "beurre", "quantité": "30 g"}
-  ],
-  "steps": ["Étape 1", "Étape 2", "Étape 3"],
-  "utensils": ["couteau", "moulin à légumes", "casserole"],
-  "cook_time": "25 minutes",
-  "prep_time": "15 minutes"
-}
+        Réponds uniquement en JSON strict, sans texte explicatif supplémentaire. Voici un exemple :
 
+        {{
+        "ingredients": [
+            {{"nom": "pommes de terre", "quantité": "1 kg"}},
+            {{"nom": "gros sel", "quantité": "10 g"}},
+            {{"nom": "lait entier", "quantité": "50 cl"}},
+            {{"nom": "beurre", "quantité": "30 g"}}
+        ],
+        "steps": [
+            "Éplucher les pommes de terre.",
+            "Faire cuire les pommes de terre dans de l'eau salée.",
+            "Passer les pommes de terre au moulin à légumes.",
+            "Ajouter du beurre et du lait chaud pour obtenir une purée onctueuse."
+        ],
+        "utensils": ["couteau", "moulin à légumes", "casserole"],
+        "cook_time": "25 minutes",
+        "prep_time": "15 minutes"
+        }}
 
-Voici le texte :
+        Voici le texte à analyser :
 
-\"\"\"{raw_transcript}\"\"\"
- 
+        \"\"\"{escaped_transcript}\"\"\"
         """
 
+        # Appel à l'API GPT
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -249,39 +260,45 @@ Voici le texte :
             temperature=0.0
         )
 
-
+        # Parse la réponse JSON
         data = json.loads(response.choices[0].message.content)
 
         # Récupérer les champs
-        ingredients = data.get("ingredients", [])
+        ingredients_raw = data.get("ingredients", [])
         steps = data.get("steps", [])
         utensils = data.get("utensils", [])
         cook_time = data.get("cook_time", "inconnu")
+        prep_time = data.get("prep_time", "inconnu")
+
+        # Traiter les ingrédients pour inclure le nom et la quantité
+        ingredients = [
+            f"{ingredient['nom']} ({ingredient['quantité']})" if ingredient.get("quantité") else ingredient["nom"]
+            for ingredient in ingredients_raw
+        ]
 
         # Convertir en chaînes pour la DB
-        if isinstance(ingredients, list):
-            ingredients = "\n".join(ingredients)
-        if isinstance(steps, list):
-            steps = "\n".join(f"- {s}" for s in steps)
-        if isinstance(utensils, list):
-            utensils = ", ".join(utensils)
+        ingredients = "\n".join(ingredients)
+        steps = "\n".join(f"- {step}" for step in steps)
+        utensils = ", ".join(utensils)
 
         return {
             "ingredients": ingredients,
             "steps": steps,
             "utensils": utensils,
-            "cook_time": cook_time
+            "cook_time": cook_time,
+            "prep_time": prep_time
         }
 
     except Exception as e:
         print("Erreur GPT extraction:", e)
-        print(response.choices[0].message.content)
+        print(escaped_transcript)
         # Fallback : on met tout dans steps
         return {
             "ingredients": "Ingrédients non détectés",
             "steps": raw_transcript,
             "utensils": "",
-            "cook_time": "inconnu"
+            "cook_time": "inconnu",
+            "prep_time": "inconnu"
         }
 
 
