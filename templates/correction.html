@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Vérifier / Corriger la Recette</h2>
+
+<form method="POST" action="{{ url_for('save_recipe') }}">
+    <input type="hidden" name="video_url" value="{{ video_url }}">
+    <input type="hidden" name="video_title" value="{{ video_title }}">
+
+    <p><strong>Transcription brute :</strong><br>
+        <textarea readonly rows="8" cols="80">{{ raw_transcript }}</textarea>
+    </p>
+
+    <label for="ingredients">Ingrédients :</label><br>
+    <textarea name="ingredients" id="ingredients" rows="4" cols="80">{{ suggested_ingredients }}</textarea>
+    <br><br>
+
+    <label for="utensils">Ustensiles :</label><br>
+    <textarea name="utensils" id="utensils" rows="2" cols="80">{{ suggested_utensils }}</textarea>
+    <br><br>
+
+    <label for="cook_time">Temps de cuisson :</label><br>
+    <input type="text" name="cook_time" id="cook_time" value="{{ suggested_cook_time }}">
+    <br><br>
+
+    <label for="steps">Étapes :</label><br>
+    <textarea name="steps" id="steps" rows="6" cols="80">{{ suggested_steps }}</textarea>
+    <br><br>
+
+    <button type="submit">Enregistrer la recette</button>
+</form>
+{% endblock %}
