@@ -3,15 +3,14 @@ import sqlite3
 import tempfile
 
 from flask import Flask, render_template, request, redirect, url_for
-import yt_dlp  # <--- Use yt-dlp instead of pytube
+import yt_dlp
 import whisper
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'  # For any temporary files if needed
 app.config['DB_PATH'] = 'database.db'
 
-# Load Whisper model
-# "tiny" or "base" is faster, "medium"/"large" is more accurate
+# Load Whisper model ("base" by default; could be "tiny", "medium", or "large")
 model = whisper.load_model("base")
 
 def init_db():
@@ -57,7 +56,7 @@ def add_recipe():
                 audio_path, video_title = download_audio_with_ytdlp(video_url, tmpdir)
 
                 # 2. Transcribe with Whisper
-                result = model.transcribe(audio_path, language='fr')  # Force FR if needed
+                result = model.transcribe(audio_path, language='fr')  # force FR if needed
                 full_text = result["text"]
 
                 # 3. Naive extraction of ingredients / steps
@@ -106,10 +105,10 @@ def view_recipe(recipe_id):
 def download_audio_with_ytdlp(url, output_dir):
     """
     Downloads the best audio-only stream with yt-dlp,
-    converts it to MP3 (or another format), and returns:
-      (path_to_audio_file, video_title)
+    converts it to MP3 (or another format),
+    and **forces 1 audio channel** to avoid multi-channel mismatch.
+    Returns: (path_to_audio_file, video_title)
     """
-    # We want just the audio track, converted to MP3
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
@@ -121,6 +120,10 @@ def download_audio_with_ytdlp(url, output_dir):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192'
             }
+        ],
+        # Force the output to have exactly 1 channel (mono)
+        'postprocessor_args': [
+            '-ac', '1'
         ]
     }
 
@@ -128,7 +131,7 @@ def download_audio_with_ytdlp(url, output_dir):
         info = ydl.extract_info(url, download=True)
         video_title = info.get('title', 'Titre inconnu')
 
-    # The downloaded file likely ends with .mp3 now
+    # The downloaded file likely ends with .mp3 now.
     # We can guess the final name by the title from info dict:
     sanitized_title = yt_dlp.utils.sanitize_filename(video_title)
     downloaded_file = os.path.join(output_dir, f"{sanitized_title}.mp3")
