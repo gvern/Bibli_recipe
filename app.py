@@ -4,10 +4,15 @@ import tempfile
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for
 import openai
+from openai import OpenAI
 import yt_dlp
 import requests
+import json
+
 
 load_dotenv()
+client = OpenAI()
+
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'  # For any temporary files if needed
 app.config['DB_PATH'] = 'database.db'
@@ -218,7 +223,7 @@ Voici le texte :
 
 \"\"\"{raw_transcript}\"\"\"
  
-Donne-moi ta réponse en JSON pur, sans guillemets superflus autour des clés JSON. Exemple:
+Donne-moi ta réponse en JSON pur. Exemple:
 
 {{
   "ingredients": ["œufs", "lait", "champignons"],
@@ -228,7 +233,7 @@ Donne-moi ta réponse en JSON pur, sans guillemets superflus autour des clés JS
 }}
         """
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {
@@ -246,11 +251,8 @@ Donne-moi ta réponse en JSON pur, sans guillemets superflus autour des clés JS
             temperature=0.0
         )
 
-        import json
-        content = response["choices"][0]["message"]["content"]
-        
-        # Essayons de parser la réponse JSON
-        data = json.loads(content)
+
+        data = json.loads(response.choices[0].message.content)
 
         # Récupérer les champs
         ingredients = data.get("ingredients", [])
@@ -275,6 +277,7 @@ Donne-moi ta réponse en JSON pur, sans guillemets superflus autour des clés JS
 
     except Exception as e:
         print("Erreur GPT extraction:", e)
+        print(response.choices[0].message.content)
         # Fallback : on met tout dans steps
         return {
             "ingredients": "Ingrédients non détectés",
