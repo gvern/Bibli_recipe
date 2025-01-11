@@ -3,80 +3,73 @@ import sqlite3
 import tempfile
 
 from flask import Flask, render_template, request, redirect, url_for
-from pytube import YouTube
+import yt_dlp  # <--- Use yt-dlp instead of pytube
 import whisper
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'  # Pour les fichiers temporaires éventuels
+app.config['UPLOAD_FOLDER'] = 'uploads'  # For any temporary files if needed
 app.config['DB_PATH'] = 'database.db'
 
-# Chargement d’un modèle Whisper
-# Le modèle "tiny" ou "base" est plus rapide, "medium" ou "large" est plus précis.
+# Load Whisper model
+# "tiny" or "base" is faster, "medium"/"large" is more accurate
 model = whisper.load_model("base")
 
-
 def init_db():
-    """Fonction pour initialiser la connexion DB et la table si besoin."""
+    """Initialize the database and create the recipes table if it doesn't exist."""
     with sqlite3.connect(app.config['DB_PATH']) as conn:
         cursor = conn.cursor()
-        # On s'assure que la table existe
-        cursor.execute("""CREATE TABLE IF NOT EXISTS recipes (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            video_url TEXT NOT NULL,
-                            title TEXT,
-                            ingredients TEXT,
-                            steps TEXT
-                        );""")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_url TEXT NOT NULL,
+                title TEXT,
+                ingredients TEXT,
+                steps TEXT
+            );
+        """)
         conn.commit()
-
 
 @app.route('/')
 def index():
-    """Page d'accueil : liste des recettes déjà extraites."""
+    """List all recipes."""
     with sqlite3.connect(app.config['DB_PATH']) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id, title, video_url FROM recipes")
         data = cursor.fetchall()
-
-    # data est une liste de tuples (id, title, video_url)
+    # data is a list of tuples (id, title, video_url)
     return render_template('index.html', recipes=data)
-
 
 @app.route('/add', methods=['GET', 'POST'])
 def add_recipe():
     """
-    Page /add : 
-    - GET : Affiche un formulaire demandant l'URL de la vidéo
-    - POST : Télécharge la vidéo, transcrit l'audio, extrait la recette et insère dans la DB
+    /add route:
+    - GET: show a form to input the YouTube video URL
+    - POST: download the audio, transcribe, extract recipe parts, store in DB
     """
     if request.method == 'POST':
         video_url = request.form.get('video_url')
         if not video_url:
             return "Veuillez fournir une URL de vidéo.", 400
 
-        # 1. Téléchargement de la vidéo (audio) via pytube
         try:
-            yt = YouTube(video_url)
-            video_title = yt.title
-            # On télécharge l'audio dans un dossier temporaire
+            # 1. Download audio with yt-dlp
             with tempfile.TemporaryDirectory() as tmpdir:
-                audio_stream = yt.streams.filter(only_audio=True).first()
-                out_file = audio_stream.download(output_path=tmpdir)
-                
-                # 2. Transcription avec Whisper
-                result = model.transcribe(out_file, language='fr')  # forcer FR si besoin
+                audio_path, video_title = download_audio_with_ytdlp(video_url, tmpdir)
+
+                # 2. Transcribe with Whisper
+                result = model.transcribe(audio_path, language='fr')  # Force FR if needed
                 full_text = result["text"]
 
-                # 3. Extraction simplifiée des ingrédients / étapes
-                #    (Ici on fait un traitement rudimentaire, à toi de l'améliorer)
+                # 3. Naive extraction of ingredients / steps
                 extracted_ingredients, extracted_steps = parse_recipe(full_text)
 
-                # 4. Sauvegarde en base
+                # 4. Store in DB
                 with sqlite3.connect(app.config['DB_PATH']) as conn:
                     cursor = conn.cursor()
-                    cursor.execute("""INSERT INTO recipes (video_url, title, ingredients, steps)
-                                      VALUES (?, ?, ?, ?)""",
-                                   (video_url, video_title, extracted_ingredients, extracted_steps))
+                    cursor.execute("""
+                        INSERT INTO recipes (video_url, title, ingredients, steps)
+                        VALUES (?, ?, ?, ?)
+                    """, (video_url, video_title, extracted_ingredients, extracted_steps))
                     conn.commit()
 
             return redirect(url_for('index'))
@@ -84,16 +77,17 @@ def add_recipe():
         except Exception as e:
             return f"Erreur lors du traitement : {e}", 500
 
-    # Méthode GET : on affiche un simple formulaire
+    # GET method: display simple form
     return render_template('add_recipe.html')
-
 
 @app.route('/recipe/<int:recipe_id>')
 def view_recipe(recipe_id):
-    """Affiche une recette en détail."""
+    """Display a single recipe in detail."""
     with sqlite3.connect(app.config['DB_PATH']) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, video_url, ingredients, steps FROM recipes WHERE id = ?", (recipe_id,))
+        cursor.execute(
+            "SELECT id, title, video_url, ingredients, steps FROM recipes WHERE id = ?",
+            (recipe_id,))
         row = cursor.fetchone()
 
     if not row:
@@ -109,41 +103,59 @@ def view_recipe(recipe_id):
 
     return render_template('recipe.html', recipe=recipe_data)
 
+def download_audio_with_ytdlp(url, output_dir):
+    """
+    Downloads the best audio-only stream with yt-dlp,
+    converts it to MP3 (or another format), and returns:
+      (path_to_audio_file, video_title)
+    """
+    # We want just the audio track, converted to MP3
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
+        'quiet': True,
+        'noprogress': True,
+        'postprocessors': [
+            {
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192'
+            }
+        ]
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        video_title = info.get('title', 'Titre inconnu')
+
+    # The downloaded file likely ends with .mp3 now
+    # We can guess the final name by the title from info dict:
+    sanitized_title = yt_dlp.utils.sanitize_filename(video_title)
+    downloaded_file = os.path.join(output_dir, f"{sanitized_title}.mp3")
+
+    return (downloaded_file, video_title)
 
 def parse_recipe(transcript: str):
     """
-    Fonction (très) rudimentaire pour séparer ingrédients et étapes 
-    à partir d'un texte brut.
-    
-    Idéalement, tu utiliseras un vrai pipeline de NLP,
-    mais voici un exemple minimaliste pour illustrer la logique.
+    Very naive approach:
+    - Looks for keywords "ingrédient(s)" and "étape(s)" or "préparation"
+    - Splits the transcript into two parts
     """
-    # On cherche un mot clé "Ingrédients" et "Etapes" dans le texte par exemple
-    # Attention, c'est très artisanal !
-    # Dans la vraie vie, on ferait du NLP plus précis (SpaCy, GPT, Regex avancées, etc.)
-
-    # Pour simplifier, on coupe en deux segments (si le mot "ingrédients" est trouvé).
-    # On peut aussi chercher "étapes" ou "préparation".
     transcript_lower = transcript.lower()
 
-    # Cherche la section "ingrédients" et la section "préparation" ou "étapes"
-    # Pour un MVP, on fait un best-effort.
     ing_start = transcript_lower.find("ingrédient")
     prep_start = transcript_lower.find("étape")
     if prep_start == -1:
         prep_start = transcript_lower.find("préparation")
 
     if ing_start == -1 or prep_start == -1:
-        # On n'a pas trouvé, on renvoie tout en "steps"
+        # If not found, everything goes to "steps"
         return ("Aucun ingrédient détecté", transcript)
-    
-    # On isole la partie Ingrédients
+
     ingredients_part = transcript[ing_start:prep_start].strip()
-    # La partie Étapes
     steps_part = transcript[prep_start:].strip()
 
     return (ingredients_part, steps_part)
-
 
 if __name__ == '__main__':
     init_db()
