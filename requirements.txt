@@ -1,5 +1,5 @@
 Flask==2.2.5
-requests==2.31.0
-openai==0.27.8
+requests==2.32.2
+openai==1.59.7
 yt-dlp==2024.10.22
 python-dotenv==1.0.1
