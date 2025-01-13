@@ -49,9 +49,9 @@ def index():
 @app.route('/add', methods=['GET', 'POST'])
 def add_recipe():
     """
-    - GET: show a form to input the YouTube video URL
-    - POST: download audio, call the Whisper endpoint manually,
-      do basic extraction, then show a correction page before final save.
+    - GET: show a form to input the video URL
+    - POST: download audio, transcribe, and analyze recipe details,
+      including the video description.
     """
     if request.method == 'POST':
         video_url = request.form.get('video_url')
@@ -59,22 +59,23 @@ def add_recipe():
             return "Veuillez fournir une URL de vidéo.", 400
 
         try:
-            # 1. Download audio with yt-dlp
+            # 1. Download audio and description
             with tempfile.TemporaryDirectory() as tmpdir:
-                audio_path, video_title = download_audio_with_ytdlp(video_url, tmpdir)
+                audio_path, video_title, video_description = download_audio_with_ytdlp(video_url, tmpdir)
 
-                # 2. Transcribe with OpenAI Whisper (via requête HTTP directe)
+                # 2. Combine transcript and description
                 raw_transcript = transcribe_with_openai_whisper(audio_path)
+                combined_text = f"{raw_transcript}\n\n{video_description}"
 
                 # 3. Extraire infos (ingrédients, étapes, ustensiles, etc.)
-                recipe_info = extract_recipe_info(raw_transcript)
+                recipe_info = extract_recipe_info(combined_text)
 
                 # 4. Affichage de la page de correction
                 return render_template(
                     'correction.html',
                     video_url=video_url,
                     video_title=video_title,
-                    raw_transcript=raw_transcript,
+                    raw_transcript=combined_text,
                     suggested_ingredients=recipe_info["ingredients"],
                     suggested_steps=recipe_info["steps"],
                     suggested_utensils=recipe_info["utensils"],
@@ -84,7 +85,7 @@ def add_recipe():
         except Exception as e:
             return f"Erreur lors du traitement : {e}", 500
 
-    # GET -> affiche le formulaire
+    # GET method -> show form
     return render_template('add_recipe.html')
 
 @app.route('/save_recipe', methods=['POST'])
@@ -141,8 +142,8 @@ def view_recipe(recipe_id):
 
 def download_audio_with_ytdlp(url, output_dir):
     """
-    Télécharge la vidéo YouTube en MP3 mono via yt-dlp,
-    puis retourne (chemin_mp3, titre_video).
+    Télécharge la vidéo de YouTube, Facebook ou Instagram en MP3 mono
+    via yt-dlp, puis retourne (chemin_mp3, titre_video, description).
     """
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -156,14 +157,20 @@ def download_audio_with_ytdlp(url, output_dir):
                 'preferredquality': '192'
             }
         ],
-        'postprocessor_args': ['-ac', '1']  # force 1 audio channel
+        'postprocessor_args': ['-ac', '1'],  # force 1 audio channel
+        'writesubtitles': True,  # Télécharge les sous-titres si disponibles
+        'writeinfojson': True,   # Écrit les métadonnées dans un fichier JSON
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         video_title = info.get('title', 'Titre inconnu')
+        description = info.get('description', '')  # Récupérer la description si elle existe
+
     sanitized_title = yt_dlp.utils.sanitize_filename(video_title)
     audio_file = os.path.join(output_dir, f"{sanitized_title}.mp3")
-    return (audio_file, video_title)
+
+    return audio_file, video_title, description
 
 def transcribe_with_openai_whisper(audio_path):
     """
@@ -196,9 +203,8 @@ def transcribe_with_openai_whisper(audio_path):
     return result.get("text", "")
 def extract_recipe_info(raw_transcript):
     """
-    Extrait ingrédients, ustensiles, temps de cuisson et étapes
-    depuis la transcription brute.
-    Utilise un prompt GPT plus précis pour mieux détecter.
+    Extrait les informations d'une recette (ingrédients, étapes, etc.) 
+    en analysant la transcription et la description combinées.
     """
     try:
         # Échapper les accolades dans le texte brut
@@ -236,19 +242,19 @@ def extract_recipe_info(raw_transcript):
         "prep_time": "15 minutes"
         }}
 
-        Voici le texte à analyser :
+
+        Voici le texte combiné contenant la transcription et la description de la vidéo :
 
         \"\"\"{escaped_transcript}\"\"\"
         """
 
-        # Appel à l'API GPT
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+        chat_completion = client.chat.completions.create(
+            model="gpt-4",
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "Tu es un assistant qui retourne uniquement du JSON strict. "
+                        "Tu es un assistant spécialisé en extraction de recettes qui retourne uniquement du JSON strict. "
                         "Pas de texte explicatif ni de disclaimers."
                     )
                 },
@@ -259,11 +265,8 @@ def extract_recipe_info(raw_transcript):
             ],
             temperature=0.0
         )
+        data = json.loads(chat_completion.choices[0].message.content)
 
-        # Parse la réponse JSON
-        data = json.loads(response.choices[0].message.content)
-
-        # Récupérer les champs
         ingredients_raw = data.get("ingredients", [])
         steps = data.get("steps", [])
         utensils = data.get("utensils", [])
@@ -291,8 +294,6 @@ def extract_recipe_info(raw_transcript):
 
     except Exception as e:
         print("Erreur GPT extraction:", e)
-        print(escaped_transcript)
-        # Fallback : on met tout dans steps
         return {
             "ingredients": "Ingrédients non détectés",
             "steps": raw_transcript,
@@ -300,7 +301,6 @@ def extract_recipe_info(raw_transcript):
             "cook_time": "inconnu",
             "prep_time": "inconnu"
         }
-
 
 if __name__ == '__main__':
     init_db()
